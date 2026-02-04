@@ -1,0 +1,220 @@
+import java.util.*;
+
+public class PizzaPricing {
+    Pizza pizza;
+    RuleEngine ruleEngine;
+    TaxEngine taxEngine;
+    double baseTaxPercentage;
+
+    public PizzaPricing(int basePrice, int taxPercentage, String size) {
+        this.pizza = new BasePizza(basePrice, size);
+        this.baseTaxPercentage = taxPercentage;
+        ruleEngine = new RuleEngine(List.of(new MutualExclusionRule()));
+        taxEngine = new TaxEngine(List.of(new CheeseBurstTaxRule()));
+    }
+
+    public boolean addTopping(String topping, int servingsCount) {
+        if (!ruleEngine.validateAll(pizza, topping)) {
+            return false;
+        }
+
+        // remember previous servings
+        int prevCount = pizza.getToppingCount(topping);
+        pizza.addTopping(topping, servingsCount);
+
+        if (topping.equals("cheeseburst")) {
+            pizza = new CheeseBurstDecorator(pizza, servingsCount, prevCount);
+        } else {
+            pizza = new RegularToppingDecorator(pizza, servingsCount, ToppingCatalog.COST.get(topping));
+        }
+        return true;
+    }
+
+    public int getFinalPrice() {
+        double subTotal = pizza.getSubtotal();
+        double taxRate = taxEngine.computeTaxRate(baseTaxPercentage, pizza);
+        double tax = (taxRate / 100) * subTotal;
+        return (int) (subTotal + tax + 0.5); // round half up
+    }
+}
+
+// ---- TAX RULES ----
+interface TaxRule {
+    double apply(double currentTaxRate, Pizza pizza);
+}
+
+class TaxEngine {
+    private final List<TaxRule> rules;
+
+    public TaxEngine(List<TaxRule> rules) {
+        this.rules = rules;
+    }
+
+    public double computeTaxRate(double baseTax, Pizza pizza) {
+        double tax = baseTax;
+        for (TaxRule rule : rules) {
+            tax = rule.apply(tax, pizza);
+        }
+        return tax;
+    }
+}
+
+class CheeseBurstTaxRule implements TaxRule {
+    @Override
+    public double apply(double currentTaxRate, Pizza pizza) {
+        if (pizza.hasTopping("cheeseburst")) {
+            return currentTaxRate * 1.3; // +30% uplift
+        }
+        return currentTaxRate;
+    }
+}
+
+// ---- RULES ----
+interface Rule {
+    boolean validate(Pizza pizza, String topping);
+}
+
+class RuleEngine {
+    private final List<Rule> rules;
+
+    public RuleEngine(List<Rule> rules) {
+        this.rules = rules;
+    }
+
+    public boolean validateAll(Pizza pizza, String topping) {
+        for (Rule rule : rules) {
+            if (!rule.validate(pizza, topping)) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+class MutualExclusionRule implements Rule {
+    @Override
+    public boolean validate(Pizza pizza, String topping) {
+        if (topping.equals("cheeseburst") && pizza.hasTopping("mushroom")) return false;
+        if (topping.equals("mushroom") && pizza.hasTopping("cheeseburst")) return false;
+        return true;
+    }
+}
+
+// ---- PIZZA INTERFACE & DECORATORS ----
+interface Pizza {
+    double getSubtotal();
+    boolean hasTopping(String topping);
+    void addTopping(String topping, int count);
+    int getToppingCount(String topping);
+}
+
+abstract class ToppingDecorator implements Pizza {
+    protected final Pizza pizza;
+
+    protected ToppingDecorator(Pizza pizza) {
+        this.pizza = pizza;
+    }
+
+    @Override
+    public boolean hasTopping(String topping) {
+        return pizza.hasTopping(topping);
+    }
+
+    @Override
+    public void addTopping(String topping, int count) {
+        pizza.addTopping(topping, count);
+    }
+
+    @Override
+    public int getToppingCount(String topping) {
+        return pizza.getToppingCount(topping);
+    }
+}
+
+class RegularToppingDecorator extends ToppingDecorator {
+    private final int servings;
+    private final int costPerServing;
+
+    public RegularToppingDecorator(Pizza pizza, int servings, int costPerServing) {
+        super(pizza);
+        this.servings = servings;
+        this.costPerServing = costPerServing;
+    }
+
+    @Override
+    public double getSubtotal() {
+        return pizza.getSubtotal() + servings * costPerServing;
+    }
+}
+
+// ---- CHEESEBURST DECORATOR FIXED ----
+class CheeseBurstDecorator extends ToppingDecorator {
+    private final int newServings;
+    private final int prevServings;
+
+    public CheeseBurstDecorator(Pizza pizza, int newServings, int prevServings) {
+        super(pizza);
+        this.newServings = newServings;
+        this.prevServings = prevServings;
+    }
+
+    @Override
+    public double getSubtotal() {
+        double cost = 0;
+        if (prevServings <= 0) {
+            // first serving cost 100
+            cost = 100;
+            if (newServings > 1) cost += (newServings - 1) * 70;
+        } else {
+            // additional servings cost 70 each
+            cost = newServings * 70;
+        }
+        return pizza.getSubtotal() + cost;
+    }
+}
+
+// ---- BASE PIZZA ----
+class BasePizza implements Pizza {
+    private final int basePrice;
+    private final String size;
+    private final Map<String, Integer> toppings = new HashMap<>();
+
+    public BasePizza(int basePrice, String size) {
+        this.basePrice = basePrice;
+        this.size = size;
+    }
+
+    @Override
+    public double getSubtotal() {
+        return basePrice;
+    }
+
+    @Override
+    public boolean hasTopping(String topping) {
+        return toppings.containsKey(topping);
+    }
+
+    @Override
+    public void addTopping(String topping, int count) {
+        toppings.put(topping, toppings.getOrDefault(topping, 0) + count);
+    }
+
+    @Override
+    public int getToppingCount(String topping) {
+        return toppings.getOrDefault(topping, 0);
+    }
+}
+
+// ---- TOPPING CATALOG ----
+class ToppingCatalog {
+    public static final Map<String, Integer> COST = Map.of(
+            "cheeseburst", 100,
+            "corn", 50,
+            "onion", 30,
+            "capsicum", 50,
+            "pineapple", 60,
+            "mushroom", 40
+    );
+}
+
+
